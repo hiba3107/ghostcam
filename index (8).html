@@ -1,0 +1,816 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GhostCam</title>
+<style>
+  :root{
+    --void:#0b0c0f; --surface:#15171c; --raise:#1c1f26; --edge:#262a33;
+    --ink:#e9e7e4; --dim:#8b8f98; --faint:#5e636d;
+    --safe:#58cfa4; --watch:#e5ae4a; --alarm:#ee5f56;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --num:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--void);color:var(--ink);font-family:var(--sans)}
+  body{min-height:100vh;padding:18px 16px 36px}
+
+  .wrap{max-width:1360px;margin:0 auto}
+  header{display:flex;align-items:baseline;gap:11px;margin-bottom:13px}
+  h1{font-size:19px;font-weight:600;margin:0;letter-spacing:-.01em}
+  header p{margin:0;color:var(--dim);font-size:13px}
+
+  .layout{display:grid;grid-template-columns:1fr 292px;gap:14px;align-items:start}
+  @media (max-width:980px){ .layout{grid-template-columns:1fr} }
+
+  .stage{position:relative;aspect-ratio:16/9;background:#05060a;border-radius:10px;
+    overflow:hidden;border:2px solid var(--edge);transition:border-color .25s,box-shadow .25s}
+  .stage.safe {border-color:var(--safe); box-shadow:0 0 0 1px rgba(88,207,164,.16),0 0 34px rgba(88,207,164,.09)}
+  .stage.watch{border-color:var(--watch);box-shadow:0 0 0 1px rgba(229,174,74,.18),0 0 34px rgba(229,174,74,.10)}
+  .stage.alarm{border-color:var(--alarm);box-shadow:0 0 0 1px rgba(238,95,86,.24),0 0 40px rgba(238,95,86,.15)}
+  video{display:none}
+  canvas{width:100%;height:100%;display:block}
+  canvas.picking{cursor:crosshair}
+
+  .strip{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;gap:9px;
+    padding:9px 13px;background:linear-gradient(180deg,rgba(5,6,10,.86),rgba(5,6,10,0));
+    font-size:13px;pointer-events:none}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
+  .dot.safe{background:var(--safe)} .dot.watch{background:var(--watch)}
+  .dot.alarm{background:var(--alarm);animation:pulse 1s steps(2,start) infinite}
+  @keyframes pulse{50%{opacity:.22}}
+  .strip .spacer{flex:1}
+  .readout{font-family:var(--num);font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums}
+
+  .hint{position:absolute;left:50%;transform:translateX(-50%);bottom:14px;
+    background:rgba(8,10,14,.9);border:1px solid var(--edge);border-radius:8px;
+    padding:8px 14px;font-size:13px;display:none}
+  .hint.on{display:block}
+
+  .rec{position:absolute;right:13px;bottom:13px;display:none;align-items:center;gap:7px;
+    padding:6px 11px;border-radius:999px;background:rgba(238,95,86,.93);
+    font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+  .rec.on{display:flex}
+  .rec i{width:7px;height:7px;border-radius:50%;background:#fff;animation:pulse 1s steps(2,start) infinite}
+
+  .veil{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    text-align:center;padding:30px;background:rgba(5,6,10,.94)}
+  .veil.gone{display:none}
+  .veil .inner{max-width:420px}
+  .veil h2{margin:0 0 8px;font-size:17px;font-weight:600}
+  .veil p{margin:0 0 18px;color:var(--dim);font-size:14px;line-height:1.55}
+  .go{background:var(--safe);color:#04231a;border:none;border-radius:7px;padding:11px 22px;
+    font:inherit;font-weight:600;font-size:14px;cursor:pointer}
+  .go:hover{filter:brightness(1.07)}
+  .go:disabled{background:var(--edge);color:var(--dim);cursor:default}
+
+  /* ---- side panel ---- */
+  .panel{background:var(--surface);border:1px solid var(--edge);border-radius:10px;padding:14px}
+  .group{padding:11px 0;border-top:1px solid var(--edge)}
+  .group:first-of-type{border-top:none;padding-top:2px}
+  .group h3{margin:0 0 3px;font-size:13.5px;font-weight:600}
+  .group .why{margin:0 0 9px;color:var(--faint);font-size:11.5px;line-height:1.45}
+
+  .row{display:flex;gap:6px;flex-wrap:wrap}
+  .big{width:100%;background:var(--safe);color:#04231a;border:none;border-radius:7px;
+    padding:11px;font:inherit;font-weight:600;font-size:13.5px;cursor:pointer}
+  .big:hover{filter:brightness(1.07)}
+  .big.set{background:var(--raise);color:var(--ink);border:1px solid var(--edge);font-weight:500}
+
+  .opt{flex:1;min-width:54px;background:var(--raise);color:var(--dim);border:1px solid var(--edge);
+    border-radius:6px;padding:7px 4px;font:inherit;font-size:12px;cursor:pointer;text-align:center}
+  .opt:hover{color:var(--ink)}
+  .opt[aria-pressed="true"]{border-color:var(--safe);color:var(--safe);background:rgba(88,207,164,.08)}
+  .opt:focus-visible{outline:2px solid var(--safe);outline-offset:1px}
+
+  .emojis{display:grid;grid-template-columns:repeat(6,1fr);gap:5px}
+  .emojis button{background:var(--raise);border:1px solid var(--edge);border-radius:6px;
+    padding:5px 0;font-size:19px;line-height:1.25;cursor:pointer}
+  .emojis button[aria-pressed="true"]{border-color:var(--safe);background:rgba(88,207,164,.1)}
+
+  .swatches{display:flex;gap:6px}
+  .swatches button{flex:1;height:30px;border-radius:6px;border:2px solid transparent;cursor:pointer}
+  .swatches button[aria-pressed="true"]{border-color:var(--ink)}
+  .swatches button.off{background:var(--raise);border:1px solid var(--edge);color:var(--dim);
+    font:inherit;font-size:11px}
+
+  .toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;
+    background:var(--raise);border:1px solid var(--edge);border-radius:7px;
+    padding:9px 11px;font:inherit;font-size:13px;color:var(--ink);cursor:pointer;text-align:left}
+  .toggle .state{font-size:11.5px;color:var(--faint)}
+  .toggle[aria-pressed="true"]{border-color:var(--safe)}
+  .toggle[aria-pressed="true"] .state{color:var(--safe)}
+  .toggle[disabled]{opacity:.45;cursor:not-allowed}
+
+  .note{margin-top:10px;color:var(--faint);font-size:11.5px;line-height:1.5}
+  .err{color:var(--alarm);font-size:12px;margin-top:8px;min-height:1em;white-space:pre-line;line-height:1.45}
+
+  footer{margin-top:13px;color:var(--dim);font-size:12.5px;line-height:1.6}
+  footer b{color:var(--ink);font-weight:600}
+  kbd{font-family:var(--num);font-size:11px;border:1px solid var(--edge);border-radius:3px;
+    padding:1px 4px;color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>GhostCam</h1>
+  <p>Keeps you visible and hides everyone else</p>
+</header>
+
+<div class="layout">
+
+  <div class="stage" id="stage">
+    <video id="video" playsinline muted></video>
+    <canvas id="canvas" width="1280" height="720"></canvas>
+
+    <div class="strip">
+      <span class="dot" id="dot"></span>
+      <span id="status">Camera off</span>
+      <span class="spacer"></span>
+      <span class="readout" id="readout"></span>
+    </div>
+
+    <div class="hint" id="hint"></div>
+    <div class="rec" id="rec"><i></i>REC <em id="recTime" style="font-style:normal">0:00</em></div>
+
+    <div class="veil" id="veil">
+      <div class="inner">
+        <h2 id="veilTitle">Turn on your camera to begin</h2>
+        <p id="veilText">Everything runs on your own machine. No video is uploaded anywhere.</p>
+        <button class="go" id="startBtn">Start camera</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+
+    <div class="group">
+      <h3>Who is me</h3>
+      <p class="why">Sit in the middle and press this once. Anyone else who appears gets hidden.</p>
+      <button class="big" id="markBtn">This is me</button>
+    </div>
+
+    <div class="group">
+      <h3>Hide other people</h3>
+      <p class="why">How anyone who is not you gets covered up.</p>
+      <div class="row" id="othersRow">
+        <button class="opt" data-mode="0" aria-pressed="true">Blur</button>
+        <button class="opt" data-mode="1" aria-pressed="false">Pixels</button>
+        <button class="opt" data-mode="2" aria-pressed="false">Box</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <h3>Put this on my face</h3>
+      <p class="why">Sticks to your face and follows it.</p>
+      <div class="emojis" id="emojiRow">
+        <button data-emoji=""   aria-pressed="true" title="nothing">—</button>
+        <button data-emoji="🙂" aria-pressed="false">🙂</button>
+        <button data-emoji="😎" aria-pressed="false">😎</button>
+        <button data-emoji="👻" aria-pressed="false">👻</button>
+        <button data-emoji="🐱" aria-pressed="false">🐱</button>
+        <button data-emoji="🤖" aria-pressed="false">🤖</button>
+        <button data-emoji="🎭" aria-pressed="false">🎭</button>
+        <button data-emoji="🦊" aria-pressed="false">🦊</button>
+        <button data-emoji="🐼" aria-pressed="false">🐼</button>
+        <button data-emoji="👽" aria-pressed="false">👽</button>
+        <button data-emoji="🔥" aria-pressed="false">🔥</button>
+        <button data-emoji="💀" aria-pressed="false">💀</button>
+      </div>
+      <p class="note">Or blur your own face instead:
+        <button class="opt" id="selfBlur" aria-pressed="false" style="flex:none;padding:3px 8px">Blur me</button>
+      </p>
+    </div>
+
+    <div class="group">
+      <h3>Draw with your finger</h3>
+      <p class="why">Point one finger at the camera and move it to draw.</p>
+      <div class="swatches" id="colourRow">
+        <button class="off" data-colour="" aria-pressed="true">Off</button>
+        <button data-colour="#ff5470" aria-pressed="false" style="background:#ff5470"></button>
+        <button data-colour="#4cc4ff" aria-pressed="false" style="background:#4cc4ff"></button>
+        <button data-colour="#5ee89b" aria-pressed="false" style="background:#5ee89b"></button>
+        <button data-colour="#ffd257" aria-pressed="false" style="background:#ffd257"></button>
+      </div>
+      <p class="note"><button class="opt" id="clearInk" style="flex:none;padding:3px 8px">Rub it out</button></p>
+    </div>
+
+    <div class="group">
+      <h3>Vanish</h3>
+      <p class="why">Hold up one finger on each hand and you disappear. Save the empty room first, or there is nothing to show behind you.</p>
+      <button class="big set" id="bgBtn">Save the empty room</button>
+      <p class="note" id="bgNote">Step out of shot, then press it.</p>
+    </div>
+
+    <div class="group">
+      <h3>Extras</h3>
+      <button class="toggle" id="phoneBtn" aria-pressed="false">
+        Hide screens and papers <span class="state">off</span></button>
+      <div style="height:6px"></div>
+      <button class="toggle" id="focusBtn" aria-pressed="false">
+        Only show one area <span class="state">off</span></button>
+      <div style="height:6px"></div>
+      <button class="toggle" id="panicBtn" aria-pressed="false">
+        Hide everything now <span class="state">off</span></button>
+      <div style="height:6px"></div>
+      <button class="toggle" id="recBtn" aria-pressed="false">
+        Record a video <span class="state">off</span></button>
+      <div class="err" id="err"></div>
+    </div>
+
+  </div>
+</div>
+
+<footer>
+  <b>Hand signals:</b> one finger draws · one finger on each hand makes you vanish · open palm hides everything.
+  <b>Keys:</b> <kbd>M</kbd> this is me · <kbd>P</kbd> hide everything · <kbd>V</kbd> record · <kbd>C</kbd> rub out drawing
+</footer>
+
+</div>
+
+<script type="module">
+const CDN  = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+const MODEL = {
+  face: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+  hand: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+  seg:  "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/selfie_segmenter.tflite",
+  obj:  "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float32/1/efficientdet_lite0.tflite",
+};
+
+const LEFT_EYE = 33, RIGHT_EYE = 263, NOSE = 1;
+const OTHER_MODES = ["blur", "pixelate", "block"];
+
+/* ---------------------------------------------------------------
+   Identity. Everything depends on knowing which face is yours.
+   Faces are matched between frames by position, so stepping out of
+   shot and back gives you a fresh id. Left alone that would blur your
+   own face for the rest of the session, so a lost owner is remembered
+   briefly and can be handed back.
+
+   The two failures are not equal. Not recognising you is annoying and
+   you press the button again. Deciding a stranger is you shows the very
+   face this exists to hide. So the reclaim is fussy and the fallback is
+   always to hide everyone.
+----------------------------------------------------------------*/
+export class FaceTracker {
+  constructor(o = {}) {
+    this.matchDistance   = o.matchDistance   ?? 140;
+    this.forgetAfter     = o.forgetAfter     ?? 15;
+    this.reclaimWindow   = o.reclaimWindow   ?? 90;
+    this.reclaimDistance = o.reclaimDistance ?? 220;
+    this.reclaimSizeTol  = o.reclaimSizeTol  ?? 0.40;
+    this.tracked = new Map();
+    this.nextId = 1;
+    this.ownerId = null;
+    this.ownerLost = 0;
+    this.ownerMemory = null;
+  }
+  update(detections) {
+    const unmatched = [...this.tracked.keys()];
+    const live = [], fresh = [];
+    for (const face of detections) {
+      let bestId = null, bestDist = this.matchDistance;
+      for (const id of unmatched) {
+        const p = this.tracked.get(id);
+        const d = Math.hypot(face.cx - p.cx, face.cy - p.cy);
+        if (d < bestDist) { bestId = id; bestDist = d; }
+      }
+      const isNew = bestId === null;
+      if (isNew) bestId = this.nextId++;
+      else unmatched.splice(unmatched.indexOf(bestId), 1);
+      const entry = { ...face, id: bestId, missing: 0 };
+      this.tracked.set(bestId, entry);
+      live.push(entry);
+      if (isNew) fresh.push(entry);
+    }
+    for (const id of unmatched) {
+      const e = this.tracked.get(id);
+      e.missing += 1;
+      if (e.missing > this.forgetAfter) this.tracked.delete(id);
+    }
+    this._updateOwner(live, fresh);
+    return live;
+  }
+  _remember(f){ this.ownerMemory = { cx:f.cx, cy:f.cy, eye:f.eye, age:0 }; }
+  _updateOwner(live, fresh) {
+    if (this.ownerId === null) return;
+    const cur = live.find(f => f.id === this.ownerId);
+    if (cur) { this.ownerLost = 0; this._remember(cur); return; }
+    this.ownerLost += 1;
+    if (this.ownerMemory) {
+      this.ownerMemory.age += 1;
+      if (this.ownerMemory.age > this.reclaimWindow) this.ownerMemory = null;
+    }
+    this._reclaim(fresh);
+  }
+  _reclaim(fresh) {
+    const m = this.ownerMemory;
+    if (!m || !fresh.length) return false;
+    let best = null, bestDist = this.reclaimDistance;
+    for (const f of fresh) {
+      const d = Math.hypot(f.cx - m.cx, f.cy - m.cy);
+      if (d >= bestDist) continue;
+      if (m.eye > 1 && Math.abs(f.eye / m.eye - 1) > this.reclaimSizeTol) continue;
+      best = f; bestDist = d;
+    }
+    if (!best) return false;
+    this.ownerId = best.id; this.ownerLost = 0; this.ownerMemory = null;
+    return true;
+  }
+  markOwner(live, w, h) {
+    if (!live.length) return false;
+    const cx = w/2, cy = h/2;
+    let best = live[0], bestScore = -Infinity;
+    for (const f of live) {
+      const s = f.area / (1 + Math.hypot(f.cx - cx, f.cy - cy));
+      if (s > bestScore) { best = f; bestScore = s; }
+    }
+    this.ownerId = best.id; this.ownerLost = 0; this._remember(best);
+    return true;
+  }
+  clearOwner(){ this.ownerId = null; this.ownerLost = 0; this.ownerMemory = null; }
+  ownerUncertain(grace = 6){ return this.ownerId !== null && this.ownerLost > grace; }
+}
+
+export function describeFace(points, w, h, mirrored = true) {
+  const at = i => { const p = points[i]; return { x:(mirrored?1-p.x:p.x)*w, y:p.y*h }; };
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for (const p of points) {
+    const x=(mirrored?1-p.x:p.x)*w, y=p.y*h;
+    if(x<minX)minX=x; if(y<minY)minY=y; if(x>maxX)maxX=x; if(y>maxY)maxY=y;
+  }
+  const l=at(LEFT_EYE), r=at(RIGHT_EYE), n=at(NOSE);
+  return { x:minX,y:minY,w:maxX-minX,h:maxY-minY,
+    cx:(minX+maxX)/2, cy:(minY+maxY)/2,
+    area:Math.max(0,maxX-minX)*Math.max(0,maxY-minY),
+    eye:Math.hypot(r.x-l.x, r.y-l.y),
+    roll:Math.atan2(r.y-l.y, r.x-l.x),
+    eyeMid:{x:(l.x+r.x)/2, y:(l.y+r.y)/2}, nose:n };
+}
+
+/* which fingers are out, used to tell drawing from vanishing from panic */
+export function readHand(points) {
+  const wrist = points[0];
+  const reach = p => Math.hypot(p.x - wrist.x, p.y - wrist.y);
+  const out = [];
+  for (const [tip, pip] of [[8,6],[12,10],[16,14],[20,18]]) {
+    out.push(reach(points[tip]) > reach(points[pip]) * 1.15);
+  }
+  const count = out.filter(Boolean).length;
+  const tip = { x: points[8].x, y: points[8].y };
+  if (count === 0) return { pose:"fist", tip };
+  if (out[0] && !out[1] && !out[2] && !out[3]) return { pose:"point", tip };
+  if (count >= 4) return { pose:"palm", tip };
+  return { pose:"other", tip };
+}
+
+/* ---------------- drawing helpers ---------------- */
+const pad = (f,a=0.16)=>({x:f.x-f.w*a, y:f.y-f.h*a, w:f.w*(1+a*2), h:f.h*(1+a*2)});
+
+// label sets differ between model versions, so match on words rather than
+// trusting one exact spelling
+const SCREEN_WORDS = ["cell phone","cellphone","mobile phone","phone","laptop",
+                      "tv","tvmonitor","monitor","screen","book","remote"];
+export function isScreen(name){
+  const n = String(name||"").toLowerCase().trim();
+  return SCREEN_WORDS.includes(n);
+}
+
+export function blurRegion(ctx, src, f, w, h, r=24){
+  const b = pad(f);
+  ctx.save(); ctx.beginPath(); ctx.rect(b.x,b.y,b.w,b.h); ctx.clip();
+  ctx.filter = `blur(${r}px)`; ctx.drawImage(src,0,0,w,h); ctx.restore();
+}
+export function pixelateRegion(ctx, src, f, w, h, blocks=10){
+  const b = pad(f);
+  if (b.w < 2 || b.h < 2) return;
+  const full = document.createElement("canvas"); full.width=w; full.height=h;
+  full.getContext("2d").drawImage(src,0,0,w,h);
+  const t = document.createElement("canvas"); t.width=blocks; t.height=blocks;
+  t.getContext("2d").drawImage(full, b.x,b.y,b.w,b.h, 0,0,blocks,blocks);
+  ctx.save(); ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(t,0,0,blocks,blocks,b.x,b.y,b.w,b.h); ctx.restore();
+}
+export function blockRegion(ctx, f, fill="#14161b"){
+  const b = pad(f);
+  ctx.save(); ctx.fillStyle=fill; ctx.fillRect(b.x,b.y,b.w,b.h); ctx.restore();
+}
+export function drawEmoji(ctx, f, emoji){
+  if (!emoji || !(f.eye > 1)) return;
+  const size = f.eye * 3.1;
+  ctx.save();
+  ctx.translate(f.cx, f.cy);
+  ctx.rotate(f.roll);
+  ctx.font = `${size}px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(emoji, 0, 0);
+  ctx.restore();
+}
+export function applyFocus(ctx, src, poly, w, h, r=26){
+  if (!poly || poly.length < 3) return;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0,0,w,h);
+  ctx.moveTo(poly[0].x, poly[0].y);
+  for (let i=poly.length-1;i>0;i--) ctx.lineTo(poly[i].x, poly[i].y);
+  ctx.closePath(); ctx.clip("evenodd");
+  ctx.filter = `blur(${r}px)`; ctx.drawImage(src,0,0,w,h); ctx.filter="none";
+  ctx.fillStyle="rgba(6,8,12,.45)"; ctx.fillRect(0,0,w,h);
+  ctx.restore();
+  ctx.save();
+  ctx.strokeStyle="rgba(88,207,164,.85)"; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(poly[0].x,poly[0].y);
+  for(let i=1;i<poly.length;i++) ctx.lineTo(poly[i].x,poly[i].y);
+  ctx.closePath(); ctx.stroke(); ctx.restore();
+}
+export function panicBlur(ctx, src, w, h, r=40){
+  ctx.save(); ctx.filter=`blur(${r}px)`; ctx.drawImage(src,0,0,w,h); ctx.filter="none";
+  ctx.fillStyle="rgba(6,8,12,.45)"; ctx.fillRect(0,0,w,h); ctx.restore();
+}
+
+window.GhostCore = { FaceTracker, describeFace, readHand, drawEmoji, isScreen,
+                     applyFocus, panicBlur, blurRegion, blockRegion, pixelateRegion };
+
+/* ---------------------------------------------------------------
+   App
+----------------------------------------------------------------*/
+const $ = id => document.getElementById(id);
+const video=$("video"), canvas=$("canvas"), ctx=canvas.getContext("2d");
+const stage=$("stage"), dot=$("dot"), statusEl=$("status"), readout=$("readout");
+const hintEl=$("hint"), veil=$("veil"), veilTitle=$("veilTitle"), veilText=$("veilText");
+const startBtn=$("startBtn"), errEl=$("err"), recEl=$("rec"), recTime=$("recTime");
+const W = canvas.width, H = canvas.height;
+
+/* layers kept between frames */
+const ink = document.createElement("canvas"); ink.width=W; ink.height=H;
+const inkCtx = ink.getContext("2d");
+const bg  = document.createElement("canvas"); bg.width=W; bg.height=H;
+const bgCtx = bg.getContext("2d");
+const maskC = document.createElement("canvas");
+const cutC  = document.createElement("canvas"); cutC.width=W; cutC.height=H;
+const cutCtx= cutC.getContext("2d");
+
+let faceModel=null, handModel=null, segModel=null, objModel=null;
+let tracker = new FaceTracker();
+let running=false, frame=0, fps=0, lastT=performance.now();
+
+let otherMode=0, emoji="", selfBlur=false;
+let inkColour="", drawing=false, lastTip=null;
+let panic=false, vanish=false, haveBg=false;
+let phoneOn=false, phoneBoxes=[];
+let picking=false, points=[], focusPolygon=null;
+let palmFrames=0, palmFired=false;
+let recorder=null, chunks=[], recStart=0;
+
+/* ---- start up. every model loads on its own so one bad url only
+       costs the feature that needs it, not the whole app ---- */
+async function boot(){
+  startBtn.disabled = true; startBtn.textContent = "Starting…"; errEl.textContent = "";
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{ width:{ideal:1280}, height:{ideal:720} }, audio:false });
+  } catch(e){ return fail("Camera blocked",
+      "Your browser would not give access. Allow the camera in the address bar and try again.", e); }
+  video.srcObject = stream; await video.play();
+
+  veilTitle.textContent = "Loading";
+  veilText.textContent = "First run downloads the models. This only happens once.";
+
+  let vision;
+  try {
+    vision = await import(`${CDN}/vision_bundle.mjs`);
+  } catch(e){ return fail("Could not load",
+      "Check you are online, and that you opened this through Live Server rather than double clicking the file.", e); }
+
+  const { FaceLandmarker, HandLandmarker, ImageSegmenter, ObjectDetector, FilesetResolver } = vision;
+  let fileset;
+  try { fileset = await FilesetResolver.forVisionTasks(`${CDN}/wasm`); }
+  catch(e){ return fail("Could not load", "The vision engine failed to download.", e); }
+
+  try {
+    faceModel = await FaceLandmarker.createFromOptions(fileset,{
+      baseOptions:{ modelAssetPath:MODEL.face, delegate:"GPU" },
+      runningMode:"VIDEO", numFaces:5 });
+  } catch(e){ return fail("Could not load the face model",
+      "This is the one part that cannot be skipped. Check your connection and try again.", e); }
+
+  try {
+    handModel = await HandLandmarker.createFromOptions(fileset,{
+      baseOptions:{ modelAssetPath:MODEL.hand, delegate:"GPU" },
+      runningMode:"VIDEO", numHands:2 });
+  } catch(e){ softFail("Hand signals are off, the hand model would not load.", e); }
+
+  try {
+    segModel = await ImageSegmenter.createFromOptions(fileset,{
+      baseOptions:{ modelAssetPath:MODEL.seg, delegate:"GPU" },
+      runningMode:"VIDEO", outputCategoryMask:true, outputConfidenceMasks:false });
+  } catch(e){ softFail("Vanish is off, the background model would not load.", e); $("bgBtn").disabled = true; }
+
+  try {
+    objModel = await ObjectDetector.createFromOptions(fileset,{
+      baseOptions:{ modelAssetPath:MODEL.obj, delegate:"GPU" },
+      runningMode:"VIDEO", scoreThreshold:0.42, maxResults:8 });
+  } catch(e){ softFail("Hiding screens is off, that model would not load.", e); $("phoneBtn").disabled = true; }
+
+  veil.classList.add("gone");
+  running = true; requestAnimationFrame(loop);
+}
+function fail(t, msg, e){
+  veilTitle.textContent=t; veilText.textContent=msg;
+  startBtn.disabled=false; startBtn.textContent="Try again";
+  errEl.textContent = e?.message ? e.message : "";
+  console.error(e);
+}
+function softFail(msg, e){
+  console.warn(msg, e);
+  const seen = errEl.textContent.split("\n").filter(Boolean);
+  if (!seen.includes(msg)) seen.push(msg);
+  errEl.textContent = seen.join("\n");
+}
+
+/* ---- per frame ---- */
+function loop(){
+  if(!running) return;
+  const now = performance.now();
+
+  ctx.save(); ctx.translate(W,0); ctx.scale(-1,1);
+  ctx.drawImage(video,0,0,W,H); ctx.restore();
+
+  let faces=[];
+  try{
+    const r = faceModel.detectForVideo(video, now);
+    faces = tracker.update((r.faceLandmarks||[]).map(p=>describeFace(p,W,H,true)));
+  }catch(e){}
+
+  if (handModel && frame % 3 === 0) readHands(now);
+  if (phoneOn && objModel && frame % 8 === 0) findObjects(now);
+
+  if (vanish && haveBg && segModel) {
+    try { drawVanish(now); } catch(e){}
+  }
+
+  if (panic) {
+    panicBlur(ctx, video, W, H);
+  } else {
+    const unsure = tracker.ownerUncertain();
+    for (const f of faces) {
+      const mine = f.id === tracker.ownerId && !unsure;
+      if (mine) {
+        if (!vanish) { if (emoji) drawEmoji(ctx,f,emoji); else if (selfBlur) blurRegion(ctx,video,f,W,H,20); }
+      } else if (tracker.ownerId !== null) {
+        const m = OTHER_MODES[otherMode];
+        if (m==="blur") blurRegion(ctx,video,f,W,H,26);
+        else if (m==="pixelate") pixelateRegion(ctx,video,f,W,H,9);
+        else blockRegion(ctx,f);
+      }
+    }
+    if (phoneOn) for (const b of phoneBoxes) blurRegion(ctx,video,b,W,H,30);
+    ctx.drawImage(ink,0,0);
+    if (focusPolygon) applyFocus(ctx,video,focusPolygon,W,H);
+  }
+
+  for (const p of points){
+    ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2);
+    ctx.fillStyle="#58cfa4"; ctx.fill();
+  }
+
+  const dt = now-lastT; lastT=now;
+  if (dt>0) fps = fps*0.9 + (1000/dt)*0.1;
+  frame += 1;
+  paintStatus(faces);
+  if (recorder?.state==="recording"){
+    const s = Math.floor((now-recStart)/1000);
+    recTime.textContent = `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
+  }
+  requestAnimationFrame(loop);
+}
+
+function readHands(now){
+  let hands=[];
+  try{
+    const r = handModel.detectForVideo(video, now+0.1);
+    hands = (r.landmarks||[]).map(readHand);
+  }catch(e){ return; }
+
+  const palm = hands.some(h=>h.pose==="palm");
+  if (palm){ palmFrames+=1; if(palmFrames>=2 && !palmFired){ palmFired=true; setPanic(!panic);} }
+  else { palmFrames=0; palmFired=false; }
+
+  const points_ = hands.filter(h=>h.pose==="point");
+  const wantVanish = points_.length >= 2;
+  if (wantVanish !== vanish) { vanish = wantVanish; showHint(vanish && !haveBg
+      ? "Save the empty room first, then this will work" : ""); }
+
+  // one finger draws, two means vanish so drawing stops
+  if (inkColour && points_.length === 1 && !vanish){
+    const t = points_[0].tip;
+    const p = { x:(1-t.x)*W, y:t.y*H };
+    if (drawing && lastTip){
+      inkCtx.strokeStyle = inkColour; inkCtx.lineWidth = 7;
+      inkCtx.lineCap="round"; inkCtx.lineJoin="round";
+      inkCtx.beginPath(); inkCtx.moveTo(lastTip.x,lastTip.y);
+      inkCtx.lineTo(p.x,p.y); inkCtx.stroke();
+    }
+    drawing = true; lastTip = p;
+  } else { drawing=false; lastTip=null; }
+}
+
+function findObjects(now){
+  try{
+    const r = objModel.detectForVideo(video, now+0.2);
+    const sx = W / (video.videoWidth  || W);
+    const sy = H / (video.videoHeight || H);
+    phoneBoxes = (r.detections||[]).filter(d=>{
+      const name = d.categories?.[0]?.categoryName || "";
+      return isScreen(name);
+    }).map(d=>{
+      const b = d.boundingBox;
+      const x = W - (b.originX + b.width) * sx;   // mirrored
+      return { x, y:b.originY*sy, w:b.width*sx, h:b.height*sy };
+    });
+  }catch(e){ phoneBoxes=[]; }
+}
+
+/* replace the person with the saved empty room */
+function drawVanish(now){
+  const res = segModel.segmentForVideo(video, now+0.3);
+  const mask = res.categoryMask;
+  if (!mask) return;
+  const mw = mask.width, mh = mask.height;
+  const data = mask.getAsUint8Array();
+
+  maskC.width = mw; maskC.height = mh;
+  const mctx = maskC.getContext("2d");
+  const img = mctx.createImageData(mw, mh);
+  for (let i=0;i<data.length;i++){
+    const person = data[i] !== 0;
+    img.data[i*4+3] = person ? 255 : 0;   // keep only the person shape
+  }
+  mctx.putImageData(img,0,0);
+
+  // silhouette, then fill it with the saved room, then stamp over the frame
+  cutCtx.save();
+  cutCtx.clearRect(0,0,W,H);
+  cutCtx.globalCompositeOperation = "source-over";
+  cutCtx.translate(W,0); cutCtx.scale(-1,1);       // mask is unmirrored
+  cutCtx.drawImage(maskC,0,0,W,H);
+  cutCtx.restore();
+  cutCtx.globalCompositeOperation = "source-in";
+  cutCtx.drawImage(bg,0,0,W,H);
+  cutCtx.globalCompositeOperation = "source-over";
+
+  ctx.drawImage(cutC,0,0);
+  if (res.close) res.close();
+}
+
+function paintStatus(faces){
+  let text, tone="";
+  if (panic){ text="Everything hidden"; tone="alarm"; }
+  else if (vanish && haveBg){ text="You are invisible"; tone="watch"; }
+  else if (vanish){ text="Save the empty room first"; tone="watch"; }
+  else if (tracker.ownerId===null){ text="Press This is me"; }
+  else if (tracker.ownerUncertain()){ text="Lost you, hiding everyone"; tone="alarm"; }
+  else {
+    const others = Math.max(0, faces.length-1);
+    text = others ? `Protected, ${others} other ${others===1?"face":"faces"} hidden` : "Protected";
+    tone = others ? "watch" : "safe";
+  }
+  statusEl.textContent = text;
+  dot.className = "dot "+tone;
+  stage.className = "stage "+tone;
+  const bits = [`${faces.length} face${faces.length===1?"":"s"}`];
+  if (phoneOn && phoneBoxes.length) bits.push(`${phoneBoxes.length} hidden`);
+  bits.push(`${fps.toFixed(0)} fps`);
+  readout.textContent = bits.join(" · ");
+}
+
+/* ---- controls ---- */
+function showHint(msg){ hintEl.textContent=msg; hintEl.classList.toggle("on", !!msg); }
+function flash(msg){ errEl.textContent=msg; setTimeout(()=>{ if(errEl.textContent===msg) errEl.textContent=""; },2800); }
+
+$("markBtn").addEventListener("click", ()=>{
+  const live=[...tracker.tracked.values()].filter(f=>f.missing===0);
+  if (!tracker.markOwner(live,W,H)) flash("No face found. Move into the middle.");
+  else showHint("");
+});
+
+$("othersRow").addEventListener("click", e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  otherMode = Number(b.dataset.mode);
+  [...e.currentTarget.children].forEach(c=>c.setAttribute("aria-pressed", c===b));
+});
+
+$("emojiRow").addEventListener("click", e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  emoji = b.dataset.emoji;
+  [...e.currentTarget.children].forEach(c=>c.setAttribute("aria-pressed", c===b));
+  if (emoji){ selfBlur=false; $("selfBlur").setAttribute("aria-pressed","false"); }
+});
+
+$("selfBlur").addEventListener("click", e=>{
+  selfBlur = !selfBlur;
+  e.currentTarget.setAttribute("aria-pressed", String(selfBlur));
+  if (selfBlur){
+    emoji="";
+    [...$("emojiRow").children].forEach((c,i)=>c.setAttribute("aria-pressed", String(i===0)));
+  }
+});
+
+$("colourRow").addEventListener("click", e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  inkColour = b.dataset.colour;
+  [...e.currentTarget.children].forEach(c=>c.setAttribute("aria-pressed", c===b));
+  showHint(inkColour ? "Point one finger at the camera and move it" : "");
+});
+
+$("clearInk").addEventListener("click", ()=> inkCtx.clearRect(0,0,W,H));
+
+$("bgBtn").addEventListener("click", ()=>{
+  if(!running){ flash("Turn the camera on first."); return; }
+  bgCtx.save(); bgCtx.translate(W,0); bgCtx.scale(-1,1);
+  bgCtx.drawImage(video,0,0,W,H); bgCtx.restore();
+  haveBg = true;
+  $("bgBtn").textContent = "Save the empty room again";
+  $("bgNote").textContent = "Saved. Hold up one finger on each hand to vanish.";
+});
+
+function toggle(btn, get, set, label){
+  btn.addEventListener("click", ()=>{
+    set(!get());
+    btn.setAttribute("aria-pressed", String(get()));
+    btn.querySelector(".state").textContent = get() ? (label||"on") : "off";
+  });
+}
+toggle($("phoneBtn"), ()=>phoneOn, v=>{ phoneOn=v; if(!v) phoneBoxes=[]; });
+toggle($("panicBtn"), ()=>panic,  v=>{ panic=v; });
+function setPanic(v){
+  panic=v;
+  $("panicBtn").setAttribute("aria-pressed", String(v));
+  $("panicBtn").querySelector(".state").textContent = v?"on":"off";
+}
+
+$("focusBtn").addEventListener("click", e=>{
+  const btn=e.currentTarget;
+  if (focusPolygon || picking){
+    focusPolygon=null; points=[]; picking=false;
+    btn.setAttribute("aria-pressed","false");
+    btn.querySelector(".state").textContent="off";
+    canvas.classList.remove("picking"); showHint("");
+  } else {
+    picking=true; points=[];
+    canvas.classList.add("picking");
+    showHint("Click four corners on the picture");
+  }
+});
+
+canvas.addEventListener("click", e=>{
+  if(!picking) return;
+  const r=canvas.getBoundingClientRect();
+  points.push({ x:(e.clientX-r.left)/r.width*W, y:(e.clientY-r.top)/r.height*H });
+  if (points.length===4){
+    focusPolygon=points.slice(); points=[]; picking=false;
+    canvas.classList.remove("picking"); showHint("");
+    $("focusBtn").setAttribute("aria-pressed","true");
+    $("focusBtn").querySelector(".state").textContent="on";
+  }
+});
+
+$("recBtn").addEventListener("click", ()=>{
+  const btn=$("recBtn");
+  if (recorder?.state==="recording"){ recorder.stop(); return; }
+  if(!running){ flash("Turn the camera on first."); return; }
+  try{
+    recorder = new MediaRecorder(canvas.captureStream(30), { mimeType:"video/webm" });
+    chunks=[];
+    recorder.ondataavailable = e=>{ if(e.data.size) chunks.push(e.data); };
+    recorder.onstop = ()=>{
+      const a=document.createElement("a");
+      a.href=URL.createObjectURL(new Blob(chunks,{type:"video/webm"}));
+      a.download=`ghostcam-${Date.now()}.webm`; a.click();
+      btn.setAttribute("aria-pressed","false");
+      btn.querySelector(".state").textContent="off";
+      recEl.classList.remove("on");
+    };
+    recorder.start(); recStart=performance.now();
+    btn.setAttribute("aria-pressed","true");
+    btn.querySelector(".state").textContent="recording";
+    recEl.classList.add("on");
+  }catch(e){ flash("Recording is not supported in this browser."); }
+});
+
+window.addEventListener("keydown", e=>{
+  if(!running) return;
+  const k=e.key.toLowerCase();
+  if(k==="m"){ e.preventDefault(); $("markBtn").click(); }
+  if(k==="p"){ e.preventDefault(); $("panicBtn").click(); }
+  if(k==="v"){ e.preventDefault(); $("recBtn").click(); }
+  if(k==="c"){ e.preventDefault(); $("clearInk").click(); }
+});
+
+startBtn.addEventListener("click", boot);
+</script>
+</body>
+</html>
